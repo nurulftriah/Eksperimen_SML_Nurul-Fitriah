@@ -1,0 +1,41 @@
+name: Auto Preprocessing
+
+on:
+  push:
+    paths:
+      - 'namadataset_raw/**'
+      - 'preprocessing/automate_Nurul-Fitriah.py'
+  workflow_dispatch:
+
+jobs:
+  preprocess:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy scikit-learn
+
+      - name: Run preprocessing script
+        run: |
+          python preprocessing/automate_Nurul-Fitriah.py
+
+      - name: Commit and push preprocessed data
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add preprocessing/namadataset_preprocessing/*
+          if git diff --staged --quiet; then
+            echo "No changes in preprocessed data."
+          else
+            git commit -m "Auto-update preprocessed dataset [skip ci]"
+            git push
+          fi
