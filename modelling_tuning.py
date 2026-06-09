@@ -18,20 +18,19 @@ import mlflow.sklearn
 # Set experiment name
 EXPERIMENT_NAME = "Latihan Credit Scoring"
 
-# Initialize DagsHub MLflow tracking if credentials are provided in environment
+# Initialize MLflow tracking
 dagshub_owner = os.getenv("DAGSHUB_REPO_OWNER")
 dagshub_repo = os.getenv("DAGSHUB_REPO_NAME")
+dagshub_token = os.getenv("DAGSHUB_TOKEN")
 
-if dagshub_owner and dagshub_repo:
-    try:
-        import dagshub
-        print(f"Initializing DagsHub MLflow tracking for {dagshub_owner}/{dagshub_repo}...")
-        dagshub.init(repo_owner=dagshub_owner, repo_name=dagshub_repo, mlflow=True)
-        mlflow.set_experiment(EXPERIMENT_NAME)
-    except ImportError:
-        print("dagshub package not installed. Logging locally instead.")
-        mlflow.set_tracking_uri("http://127.0.0.1:5000")
-        mlflow.set_experiment(EXPERIMENT_NAME)
+if dagshub_owner and dagshub_repo and dagshub_token:
+    print(f"Initializing DagsHub MLflow tracking for {dagshub_owner}/{dagshub_repo}...")
+    # Pakai token langsung, tanpa OAuth
+    os.environ["MLFLOW_TRACKING_USERNAME"] = dagshub_owner
+    os.environ["MLFLOW_TRACKING_PASSWORD"] = dagshub_token
+    mlflow.set_tracking_uri(f"https://dagshub.com/{dagshub_owner}/{dagshub_repo}.mlflow")
+    mlflow.set_experiment(EXPERIMENT_NAME)
+    print("DagsHub MLflow tracking initialized successfully.")
 else:
     print("No DagsHub credentials found. Using local tracking URI (http://127.0.0.1:5000)")
     mlflow.set_tracking_uri("http://127.0.0.1:5000")
@@ -44,9 +43,7 @@ def find_dataset():
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     candidates = [
-        # ✅ UTAMA: dijalankan dari root Eksperimen_SML_Nurul-Fitriah/
         os.path.join("preprocessing", "namadataset_preprocessing", filename),
-        # Fallback path absolut berdasarkan lokasi script
         os.path.join(script_dir, "preprocessing", "namadataset_preprocessing", filename),
     ]
     for path in candidates:
@@ -55,31 +52,26 @@ def find_dataset():
             return path
     raise FileNotFoundError(
         f"File '{filename}' tidak ditemukan.\n"
-        "Pastikan preprocessing sudah dijalankan dan script dijalankan dari folder Eksperimen_SML_Nurul-Fitriah/\n"
+        "Pastikan preprocessing sudah dijalankan.\n"
         f"Path yang dicoba:\n" + "\n".join(f"  - {os.path.abspath(p)}" for p in candidates)
     )
 
 
 def main():
-    # Load preprocessed dataset
     data_path = find_dataset()
     df = pd.read_csv(data_path)
     print(f"Loaded preprocessed data of shape {df.shape}")
 
-    # Split features and target
     X = df.drop(columns=['default'])
     y = df['default']
 
-    # Train-test split
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    # Start MLflow run
     with mlflow.start_run() as run:
         print(f"Started MLflow run: {run.info.run_id}")
 
-        # 1. Hyperparameter Tuning using GridSearchCV
         rf = RandomForestClassifier(random_state=42)
         param_grid = {
             'n_estimators': [50, 100],
@@ -97,11 +89,9 @@ def main():
         best_params = grid_search.best_params_
         print(f"Best Hyperparameters: {best_params}")
 
-        # Log parameters
         for param_name, param_value in best_params.items():
             mlflow.log_param(param_name, param_value)
 
-        # 2. Evaluate model on test set
         y_pred = best_model.predict(X_test)
         y_pred_proba = best_model.predict_proba(X_test)[:, 1]
 
@@ -114,15 +104,12 @@ def main():
         }
         print(f"Model Metrics: {metrics}")
 
-        # Log metrics
         for metric_name, metric_value in metrics.items():
             mlflow.log_metric(metric_name, metric_value)
 
-        # 3. Log model
         print("Logging model to MLflow...")
         mlflow.sklearn.log_model(best_model, "model")
 
-        # Simpan semua artifact sementara ke folder tmp
         tmp_dir = "tmp_artifacts"
         os.makedirs(tmp_dir, exist_ok=True)
 
@@ -185,13 +172,13 @@ def main():
         mlflow.log_artifact(schema_path)
         print("Logged data_schema.json (Additional Artifact 2)")
 
-        # Save model pickle untuk FastAPI / serving
+        # Save model pickle
         os.makedirs("app", exist_ok=True)
         with open("app/model.pkl", "wb") as f:
             pickle.dump(best_model, f)
-        print("Saved model pickle locally to app/model.pkl")
+        print("Saved model pickle to app/model.pkl")
 
-        # Save run ID untuk CI/CD
+        # Save run ID
         with open("run_id.txt", "w") as f:
             f.write(run.info.run_id)
 
