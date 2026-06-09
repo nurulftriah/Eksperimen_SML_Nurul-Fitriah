@@ -9,16 +9,7 @@ on:
 jobs:
   train-and-deploy:
     runs-on: ubuntu-latest
-    env:
-      DAGSHUB_REPO_OWNER: nurulftriah
-      DAGSHUB_REPO_NAME: Eksperimen_SML_Nurul-Fitriah
-      MLFLOW_TRACKING_URI: https://dagshub.com/nurulftriah/Eksperimen_SML_Nurul-Fitriah.mlflow
-      MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
-      MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
     steps:
-      - name: Set up job
-        run: echo "Starting CI/CD job..."
-
       - name: Checkout repository
         uses: actions/checkout@v3
 
@@ -27,27 +18,20 @@ jobs:
         with:
           python-version: '3.12.7'
 
-      - name: Check environment
-        run: |
-          echo "Python version:"
-          python --version
-          echo "Workspace path: $GITHUB_WORKSPACE"
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install mlflow dagshub pandas numpy scikit-learn matplotlib seaborn psutil fastapi uvicorn prometheus-client
-
-      - name: Set MLflow Tracking URI
-        run: |
-          echo "MLFLOW_TRACKING_URI=$MLFLOW_TRACKING_URI" >> $GITHUB_ENV
+          pip install -r requirements.txt
 
       - name: Run modelling and tuning
+        env:
+          DAGSHUB_REPO_OWNER: ${{ secrets.DAGSHUB_USERNAME }}
+          DAGSHUB_REPO_NAME: Eksperimen_SML_Nurul-Fitriah
+          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
         run: |
           python modelling_tuning.py
 
       - name: Get latest MLflow run_id
-        id: run_id
         run: |
           RUN_ID=$(cat run_id.txt)
           echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
@@ -63,7 +47,6 @@ jobs:
             tmp_artifacts/training_confusion_matrix.png
             tmp_artifacts/feature_importance.png
             tmp_artifacts/data_schema.json
-            preprocessing/namadataset_preprocessing/credit_scoring_preprocessing.csv
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -74,17 +57,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build Docker image
+      - name: Build and push Docker image
         run: |
-          docker build -t credit-scoring-model:latest ./app
-
-      - name: Tag Docker image
-        run: |
-          docker tag credit-scoring-model:latest ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:latest
-
-      - name: Push Docker image
-        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:latest ./app
+          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:latest \
+            ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:${{ env.RUN_ID }}
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:${{ env.RUN_ID }}
 
       - name: Complete job
         run: echo "CI/CD pipeline completed successfully!"
