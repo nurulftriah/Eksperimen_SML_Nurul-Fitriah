@@ -56,13 +56,16 @@ def find_dataset():
         f"Path yang dicoba:\n" + "\n".join(f"  - {os.path.abspath(p)}" for p in candidates)
     )
 
-
 def main():
     data_path = find_dataset()
     df = pd.read_csv(data_path)
     print(f"Loaded preprocessed data of shape {df.shape}")
 
-    X = df.drop(columns=['default'])
+    # Drop kolom non-numerik yang tidak diperlukan
+    cols_to_drop = ['default']
+    if 'customer_id' in df.columns:
+        cols_to_drop.append('customer_id')
+    X = df.drop(columns=cols_to_drop)
     y = df['default']
 
     X_train, X_test, y_train, y_test = train_test_split(
