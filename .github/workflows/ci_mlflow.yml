@@ -44,22 +44,16 @@ jobs:
       - name: Train model & log to DagsHub MLflow
         id: train
         run: |
-          # Jalankan dan capture semua output (stdout + stderr)
           python modelling_tuning.py 2>&1
           EXIT_CODE=$?
-
-          echo "=== Python exit code: $EXIT_CODE ==="
-
           if [ $EXIT_CODE -ne 0 ]; then
             echo "ERROR: modelling_tuning.py gagal dengan exit code $EXIT_CODE"
             exit $EXIT_CODE
           fi
-
           if [ ! -f "run_id.txt" ]; then
             echo "ERROR: run_id.txt tidak ditemukan meski script sukses"
             exit 1
           fi
-
           RUN_ID=$(cat run_id.txt)
           echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
           echo "Captured Run ID: $RUN_ID"
@@ -78,11 +72,20 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # ✅ FIX: Download ke folder sementara, bukan ke ./app
+      # agar Dockerfile dari repo tidak tertimpa
       - name: Download model artifact
         uses: actions/download-artifact@v4
         with:
           name: model-pkl
-          path: app/
+          path: tmp-model/
+
+      # Pindahkan model.pkl ke app/ (Dockerfile sudah ada di sana dari checkout)
+      - name: Copy model.pkl ke app/
+        run: |
+          cp tmp-model/model.pkl app/model.pkl
+          echo "=== Isi folder app/ ==="
+          ls -la app/
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
