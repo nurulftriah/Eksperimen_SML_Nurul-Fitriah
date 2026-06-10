@@ -29,7 +29,7 @@ jobs:
           DAGSHUB_REPO_NAME: Eksperimen_SML_Nurul-Fitriah
           DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
         run: |
-          python modelling_tuning.py
+          mlflow run MLProject --experiment-name "Eksperimen_SML_Nurul-Fitriah"
 
       - name: Get latest MLflow run_id
         run: |
