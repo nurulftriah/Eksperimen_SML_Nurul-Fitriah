@@ -32,11 +32,34 @@ jobs:
       - name: Run preprocessing
         run: python preprocessing/automate_Nurul-Fitriah.py
 
+      - name: Verify preprocessing output exists
+        run: |
+          if [ ! -f "preprocessing/namadataset_preprocessing/credit_scoring_preprocessing.csv" ]; then
+            echo "ERROR: File preprocessing tidak ditemukan!"
+            ls -la preprocessing/ || true
+            exit 1
+          fi
+          echo "File preprocessing OK."
+
       - name: Train model & log to DagsHub MLflow
         id: train
         run: |
-          python modelling_tuning.py
-          # Ambil run_id dari run_id.txt yang ditulis oleh script
+          # Jalankan dan capture semua output (stdout + stderr)
+          python modelling_tuning.py 2>&1
+          EXIT_CODE=$?
+
+          echo "=== Python exit code: $EXIT_CODE ==="
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "ERROR: modelling_tuning.py gagal dengan exit code $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
+
+          if [ ! -f "run_id.txt" ]; then
+            echo "ERROR: run_id.txt tidak ditemukan meski script sukses"
+            exit 1
+          fi
+
           RUN_ID=$(cat run_id.txt)
           echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
           echo "Captured Run ID: $RUN_ID"
@@ -52,11 +75,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ✅ FIX UTAMA: checkout repo agar folder ./app tersedia di runner
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ✅ Download model.pkl hasil training dari job sebelumnya
       - name: Download model artifact
         uses: actions/download-artifact@v4
         with:
