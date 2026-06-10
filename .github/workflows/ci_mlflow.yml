@@ -1,5 +1,4 @@
 name: MLflow CI CD
-
 on:
   push:
     branches:
@@ -32,8 +31,33 @@ jobs:
           mlflow run . --experiment-name "Eksperimen_SML_Nurul-Fitriah" --env-manager=local
 
       - name: Get latest MLflow run_id
+        env:
+          DAGSHUB_REPO_OWNER: ${{ secrets.DAGSHUB_USERNAME }}
+          DAGSHUB_REPO_NAME: Eksperimen_SML_Nurul-Fitriah
+          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
         run: |
-          RUN_ID=$(cat run_id.txt)
+          RUN_ID=$(python - <<'EOF'
+          import os
+          import mlflow
+
+          owner = os.environ["DAGSHUB_REPO_OWNER"]
+          repo  = os.environ["DAGSHUB_REPO_NAME"]
+          token = os.environ["DAGSHUB_TOKEN"]
+
+          os.environ["MLFLOW_TRACKING_USERNAME"] = owner
+          os.environ["MLFLOW_TRACKING_PASSWORD"] = token
+          mlflow.set_tracking_uri(f"https://dagshub.com/{owner}/{repo}.mlflow")
+
+          client = mlflow.tracking.MlflowClient()
+          experiment = client.get_experiment_by_name("Latihan Credit Scoring")
+          runs = client.search_runs(
+              experiment_ids=[experiment.experiment_id],
+              order_by=["start_time DESC"],
+              max_results=1
+          )
+          print(runs[0].info.run_id)
+          EOF
+          )
           echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
           echo "Latest MLflow Run ID: $RUN_ID"
 
