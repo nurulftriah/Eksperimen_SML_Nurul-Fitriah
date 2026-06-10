@@ -8,23 +8,28 @@ on:
 jobs:
   train-and-log:
     runs-on: ubuntu-latest
-
     env:
       DAGSHUB_REPO_OWNER: ${{ secrets.DAGSHUB_USERNAME }}
       DAGSHUB_REPO_NAME: Eksperimen_SML_Nurul-Fitriah
       DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
-
     outputs:
-      run_id: ${{ steps.train.outputs.run_id }}
+      run_id: ${{ steps.get_run_id.outputs.run_id }}
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - name: Run actions/checkout@v3
+        uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Set up Python 3.12.7
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.12.7"
+
+      - name: Check Env
+        run: |
+          python --version
+          pip --version
+          echo "DAGSHUB_REPO_OWNER: $DAGSHUB_REPO_OWNER"
+          echo "DAGSHUB_REPO_NAME: $DAGSHUB_REPO_NAME"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -41,22 +46,43 @@ jobs:
           fi
           echo "File preprocessing OK."
 
-      - name: Train model & log to DagsHub MLflow
-        id: train
+      - name: Run mlflow project
         run: |
-          python modelling_tuning.py 2>&1
+          MLFLOW_TRACKING_URI="https://dagshub.com/${{ secrets.DAGSHUB_USERNAME }}/Eksperimen_SML_Nurul-Fitriah.mlflow" \
+          MLFLOW_TRACKING_USERNAME="${{ secrets.DAGSHUB_USERNAME }}" \
+          MLFLOW_TRACKING_PASSWORD="${{ secrets.DAGSHUB_TOKEN }}" \
+          mlflow run . --env-manager=local 2>&1
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ]; then
-            echo "ERROR: modelling_tuning.py gagal dengan exit code $EXIT_CODE"
+            echo "ERROR: mlflow run gagal dengan exit code $EXIT_CODE"
             exit $EXIT_CODE
           fi
+
+      - name: Get latest MLflow run_id
+        id: get_run_id
+        run: |
           if [ ! -f "run_id.txt" ]; then
-            echo "ERROR: run_id.txt tidak ditemukan meski script sukses"
+            echo "ERROR: run_id.txt tidak ditemukan"
             exit 1
           fi
           RUN_ID=$(cat run_id.txt)
           echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
           echo "Captured Run ID: $RUN_ID"
+
+      - name: Install Python dependencies
+        run: |
+          pip install mlflow
+
+      - name: Upload to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlflow-artifacts-${{ needs.train-and-log.outputs.run_id || github.sha }}
+          path: |
+            modelling_tuning.py
+            requirements.txt
+            MLproject
+            run_id.txt
+          retention-days: 30
 
       - name: Upload model artifact
         uses: actions/upload-artifact@v4
@@ -69,18 +95,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - name: Run actions/checkout@v3
+        uses: actions/checkout@v3
 
-      # ✅ FIX: Download ke folder sementara, bukan ke ./app
-      # agar Dockerfile dari repo tidak tertimpa
       - name: Download model artifact
         uses: actions/download-artifact@v4
         with:
           name: model-pkl
           path: tmp-model/
 
-      # Pindahkan model.pkl ke app/ (Dockerfile sudah ada di sana dari checkout)
       - name: Copy model.pkl ke app/
         run: |
           cp tmp-model/model.pkl app/model.pkl
@@ -93,9 +116,16 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./app
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:latest
+      - name: Build Docker Model
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:latest ./app
+
+      - name: Tag Docker Image
+        run: |
+          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:latest \
+            ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:${{ github.sha }}
+
+      - name: Push Docker Image
+        run: |
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:${{ github.sha }}
