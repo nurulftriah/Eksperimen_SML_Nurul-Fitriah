@@ -1,93 +1,77 @@
-name: MLflow CI CD
+name: CI MLflow - Training & Deploy
+
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  train-and-deploy:
+  train-and-log:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
 
-      - name: Set up Python 3.12.7
-        uses: actions/setup-python@v4
+    env:
+      DAGSHUB_REPO_OWNER: ${{ secrets.DAGSHUB_USERNAME }}
+      DAGSHUB_REPO_NAME: Eksperimen_SML_Nurul-Fitriah
+      DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+
+    outputs:
+      run_id: ${{ steps.train.outputs.run_id }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.12.7'
+          python-version: "3.12"
 
       - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run preprocessing
+        run: python preprocessing/automate_Nurul-Fitriah.py
+
+      - name: Train model & log to DagsHub MLflow
+        id: train
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python modelling_tuning.py
+          # Ambil run_id dari run_id.txt yang ditulis oleh script
+          RUN_ID=$(cat run_id.txt)
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "Captured Run ID: $RUN_ID"
 
-      - name: Run modelling and tuning
-        env:
-          DAGSHUB_REPO_OWNER: ${{ secrets.DAGSHUB_USERNAME }}
-          DAGSHUB_REPO_NAME: Eksperimen_SML_Nurul-Fitriah
-          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
-        run: |
-          mlflow run . --experiment-name "Eksperimen_SML_Nurul-Fitriah" --env-manager=local
-
-      - name: Get latest MLflow run_id
-        env:
-          DAGSHUB_REPO_OWNER: ${{ secrets.DAGSHUB_USERNAME }}
-          DAGSHUB_REPO_NAME: Eksperimen_SML_Nurul-Fitriah
-          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
-        run: |
-          RUN_ID=$(python - <<'EOF'
-          import os
-          import mlflow
-
-          owner = os.environ["DAGSHUB_REPO_OWNER"]
-          repo  = os.environ["DAGSHUB_REPO_NAME"]
-          token = os.environ["DAGSHUB_TOKEN"]
-
-          os.environ["MLFLOW_TRACKING_USERNAME"] = owner
-          os.environ["MLFLOW_TRACKING_PASSWORD"] = token
-          mlflow.set_tracking_uri(f"https://dagshub.com/{owner}/{repo}.mlflow")
-
-          client = mlflow.tracking.MlflowClient()
-          experiment = client.get_experiment_by_name("Latihan Credit Scoring")
-          runs = client.search_runs(
-              experiment_ids=[experiment.experiment_id],
-              order_by=["start_time DESC"],
-              max_results=1
-          )
-          print(runs[0].info.run_id)
-          EOF
-          )
-          echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
-          echo "Latest MLflow Run ID: $RUN_ID"
-
-      - name: Upload artifacts to GitHub
+      - name: Upload model artifact
         uses: actions/upload-artifact@v4
         with:
-          name: model-artifacts
-          path: |
-            tmp_artifacts/estimator.html
-            tmp_artifacts/metric_info.json
-            tmp_artifacts/training_confusion_matrix.png
-            tmp_artifacts/feature_importance.png
-            tmp_artifacts/data_schema.json
+          name: model-pkl
+          path: app/model.pkl
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+  build-and-push-docker:
+    needs: train-and-log
+    runs-on: ubuntu-latest
+
+    steps:
+      # ✅ FIX UTAMA: checkout repo agar folder ./app tersedia di runner
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # ✅ Download model.pkl hasil training dari job sebelumnya
+      - name: Download model artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: model-pkl
+          path: app/
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push Docker image
-        run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:latest ./app
-          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:latest \
-            ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:${{ env.RUN_ID }}
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:latest
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:${{ env.RUN_ID }}
-
-      - name: Complete job
-        run: echo "CI/CD pipeline completed successfully!"
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/credit-scoring-model:latest
