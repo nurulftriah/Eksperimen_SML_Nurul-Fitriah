@@ -72,7 +72,7 @@ def main():
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-        run_id = os.getenv("MLFLOW_RUN_ID")
+    run_id = os.getenv("MLFLOW_RUN_ID")
         with mlflow.start_run(run_id=run_id) as run:
         print(f"Started MLflow run: {run.info.run_id}")
 
